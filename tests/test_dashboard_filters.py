@@ -1,4 +1,8 @@
 import unittest
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
 import pandas as pd
 
@@ -24,6 +28,19 @@ class DashboardFilterTests(unittest.TestCase):
         result = prepare_month_year(self.data)
         self.assertEqual(result["year"].tolist(), [2024, 2024, 2025, 2025])
         self.assertEqual(result["month"].tolist(), [1, 6, 1, 6])
+
+    def test_dashboard_imports_src_when_launched_outside_repository(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        script = repository / "dashboard" / "app.py"
+        with tempfile.TemporaryDirectory() as working_directory:
+            completed = subprocess.run(
+                [sys.executable, "-c", f"import runpy; runpy.run_path({str(script)!r})"],
+                cwd=working_directory,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":
