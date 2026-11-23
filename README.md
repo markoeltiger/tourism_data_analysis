@@ -10,8 +10,7 @@ indicators using official Hungarian and European statistics.
 > ECB endpoints returned valid provider payloads. Retrieved originals and their
 > SHA-256 manifest are stored locally under `data/raw/` and are excluded from
 > version control. The source inventory records the exact queries, observed
-> coverage and licensing notes. The acquisition layer does not publish raw
-> datasets or claim analytical findings.
+> coverage and licensing notes.
 
 ## Research questions
 
@@ -103,6 +102,24 @@ using the training-period median. Predictive performance is not causal
 evidence. The small annual economic series, structural breaks, changing
 statistical definitions, coverage and missing observations limit inference.
 
-At present, no empirical conclusion or model score is available. The project
-does not claim that a source was verified or fetched until the pipeline
-successfully retrieves and parses its original provider payload.
+## Observed model results
+
+For the exact Eurostat series `freq=M`, `c_resid=TOTAL`, `unit=NR`,
+`nace_r2=I551`, and `geo=HU`, the chronological holdout contains 26 months.
+The seasonal-naive model had MAE 108,174, RMSE 123,191 and R-squared 0.947;
+the random forest had MAE 111,227, RMSE 149,037 and R-squared 0.923. These
+values are in-provider-unit nights and are not evidence of future accuracy.
+The logistic regression classified the training-median threshold with accuracy
+0.923 and F1 0.955; the shallow decision tree achieved accuracy 0.846 and F1
+0.909.
+
+The 11 matched annual observations yield positive simple correlations for the
+tested economic indicators, but simple R-squared values range from 0.0025 to
+0.058 and the fitted four-predictor model has a high condition number
+(3.195 million). It is therefore descriptive only and not suitable for causal
+or stable out-of-sample inference.
+
+Eurostat national observations and KSH county/region observations are not
+equivalent geographic series and must not be summed or directly compared.
+The pipeline reports unavailable or not-run states when dimensions remain
+ambiguous or the sample is too small.
