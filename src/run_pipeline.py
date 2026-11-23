@@ -39,6 +39,7 @@ def run(
         return statuses
 
     frames = clean_downloads()
+    statuses["cleaning"] = f"Cleaned and exported {len(frames)} datasets"
     if not frames:
         statuses["data"] = "No observations were returned by the configured source responses"
         _write_status(statuses)

@@ -5,9 +5,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pandas as pd
 import requests
 
 from src.data_cleaning import (
+    clean_downloads,
     ecb_to_frame,
     eurostat_to_frame,
     ksh_to_frame,
@@ -36,16 +38,72 @@ class ProviderParsingTests(unittest.TestCase):
     def test_world_bank_normalizes_annual_indicator(self):
         payload = [
             {"page": 1},
-            [{
-                "date": "2024",
-                "value": 2.5,
-                "countryiso3code": "HUN",
-                "country": {"value": "Hungary"},
-            }],
+            [
+                {
+                    "date": "2024",
+                    "value": 2.5,
+                    "countryiso3code": "HUN",
+                    "country": {"value": "Hungary"},
+                },
+                {
+                    "date": "2024",
+                    "value": 2.5,
+                    "countryiso3code": "HUN",
+                    "country": {"value": "Hungary"},
+                },
+            ],
         ]
         frame = world_bank_to_frame(payload, "TEST")
+        self.assertEqual(len(frame), 1)
         self.assertEqual(int(frame.loc[0, "year"]), 2024)
         self.assertEqual(frame.loc[0, "value"], 2.5)
+
+    def test_eurostat_omits_missing_cells_and_adds_month_identifiers(self):
+        payload = {
+            "id": ["freq", "geo", "time"],
+            "size": [1, 1, 2],
+            "dimension": {
+                "freq": {"category": {"index": {"M": 0}}},
+                "geo": {"category": {"index": {"hu": 0}, "label": {"hu": "Hungary"}}},
+                "time": {"category": {"index": {"2024-01": 0, "2024-02": 1}}},
+            },
+            "value": {"0": 100},
+        }
+
+        frame = eurostat_to_frame(payload)
+
+        self.assertEqual(len(frame), 1)
+        self.assertEqual(frame.loc[0, "geo"], "HU")
+        self.assertEqual(frame.loc[0, "value"], 100)
+        self.assertEqual(frame.loc[0, "year"], 2024)
+        self.assertEqual(frame.loc[0, "month"], 1)
+
+    def test_annual_eurostat_series_does_not_receive_a_month_field(self):
+        payload = {
+            "id": ["freq", "time"],
+            "size": [1, 1],
+            "dimension": {
+                "freq": {"category": {"index": {"A": 0}}},
+                "time": {"category": {"index": {"2024": 0}}},
+            },
+            "value": {"0": 100},
+        }
+
+        frame = eurostat_to_frame(payload)
+
+        self.assertEqual(frame.loc[0, "year"], 2024)
+        self.assertNotIn("month", frame)
+
+    def test_world_bank_rejects_conflicting_duplicate_observations(self):
+        payload = [
+            {"page": 1},
+            [
+                {"date": "2024", "value": 2.5, "countryiso3code": "HUN", "country": {"value": "Hungary"}},
+                {"date": "2024", "value": 3.5, "countryiso3code": "HUN", "country": {"value": "Hungary"}},
+            ],
+        ]
+        with self.assertRaisesRegex(ValueError, "Conflicting duplicate"):
+            world_bank_to_frame(payload, "TEST")
 
     def test_model_series_rejects_ambiguous_categories(self):
         import pandas as pd
@@ -76,12 +134,12 @@ class RawProviderReaderTests(unittest.TestCase):
             frame = ksh_to_frame(path)
 
             self.assertEqual(len(frame), 3)
-            self.assertEqual(frame["geo"].tolist(), ["Budapest", "Budapest", "Total"])
-            self.assertEqual(frame["value"].tolist(), [1234, 0, 2345])
+            self.assertEqual(frame["geo"].tolist(), ["Budapest", "Total", "Budapest"])
+            self.assertEqual(frame["value"].tolist(), [1234, 2345, 0])
             self.assertEqual(frame["period"].dt.strftime("%Y-%m").tolist(), [
                 "2024-01",
-                "2024-02",
                 "2024-01",
+                "2024-02",
             ])
             self.assertEqual(frame["accommodation_type"].tolist(), [
                 "Commercial accommodation establishments",
@@ -113,6 +171,76 @@ class RawProviderReaderTests(unittest.TestCase):
             path.write_text("not a KSH table\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "monthly header"):
                 ksh_to_frame(path)
+
+    def test_ksh_reader_rejects_conflicting_duplicate_geographies(self):
+        content = (
+            "Name of territorial units;Level of territorial units;2024 January\n"
+            "Budapest;capital, region;10\n"
+            "Budapest;capital, region;11\n"
+        ).encode("iso-8859-2")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "conflicting.csv"
+            path.write_bytes(content)
+            with self.assertRaisesRegex(ValueError, "Conflicting duplicate"):
+                ksh_to_frame(path)
+
+    def test_clean_downloads_merges_only_compatible_indicators_and_stacks_ksh(self):
+        def world_bank_payload(observations):
+            return [{"page": 1}, observations]
+
+        def observation(year, value):
+            return {
+                "date": str(year),
+                "value": value,
+                "countryiso3code": "HUN",
+                "country": {"value": "Hungary"},
+            }
+
+        ksh_content = (
+            "Name of territorial units;Level of territorial units;2024 January\n"
+            "Budapest;capital, region;10\n"
+        ).encode("iso-8859-2")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            raw = root / "raw"
+            processed = root / "processed"
+            (raw / "world_bank").mkdir(parents=True)
+            (raw / "ksh").mkdir()
+            (raw / "world_bank" / "IND_A.json").write_text(
+                json.dumps(world_bank_payload([observation(2024, 1.0)])),
+                encoding="utf-8",
+            )
+            (raw / "world_bank" / "IND_B.json").write_text(
+                json.dumps(world_bank_payload([observation(2023, 2.0)])),
+                encoding="utf-8",
+            )
+            (raw / "ksh" / "tur0079.csv").write_bytes(ksh_content)
+            (raw / "ksh" / "tur0080.csv").write_bytes(ksh_content)
+
+            outputs = clean_downloads(raw, processed)
+
+            wide = outputs["world_bank_indicators_wide"]
+            self.assertEqual(wide["country_code"].tolist(), ["HUN", "HUN"])
+            self.assertTrue(pd.isna(wide.loc[wide["year"] == 2023, "IND_A"]).all())
+            self.assertTrue(pd.isna(wide.loc[wide["year"] == 2024, "IND_B"]).all())
+            ksh = outputs["ksh_tourism_monthly"]
+            self.assertEqual(set(ksh["dataset"]), {"tur0079", "tur0080"})
+            self.assertEqual(ksh["value"].tolist(), [10, 10])
+            self.assertTrue((ksh["year"] == 2024).all())
+            self.assertTrue((ksh["month"] == 1).all())
+            self.assertTrue((processed / "world_bank_indicators_wide.csv").exists())
+            self.assertTrue((processed / "ksh_tourism_monthly.csv").exists())
+            export_bytes = {
+                name: (processed / name).read_bytes()
+                for name in ("world_bank_indicators_wide.csv", "ksh_tourism_monthly.csv")
+            }
+
+            clean_downloads(raw, processed)
+
+            self.assertEqual(export_bytes, {
+                name: (processed / name).read_bytes()
+                for name in ("world_bank_indicators_wide.csv", "ksh_tourism_monthly.csv")
+            })
 
 
 class DownloaderTests(unittest.TestCase):
