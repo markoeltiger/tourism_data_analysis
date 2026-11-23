@@ -11,6 +11,7 @@ from src.analysis import run_eda
 from src.data_cleaning import PROCESSED_DIR, RAW_DIR, clean_downloads
 from src.data_collection import download_sources
 from src.modelling import analyze_annual_economy, fit_demand_models, make_monthly_series
+from src.prediction import run_chronological_prediction
 
 
 def run(
@@ -51,13 +52,30 @@ def run(
     if tourism is None or tourism.empty or "period" not in tourism:
         statuses["models"] = "UNAVAILABLE: monthly national tourism series is not present"
     else:
+        if not category_filters:
+            available_filters = {
+                column: set(tourism[column].dropna().astype(str).unique())
+                for column in ("freq", "c_resid", "unit", "nace_r2", "geo")
+                if column in tourism
+            }
+            category_filters = {}
+            if "freq" in available_filters and "M" in available_filters["freq"]:
+                category_filters["freq"] = "M"
+            if "c_resid" in available_filters and "TOTAL" in available_filters["c_resid"]:
+                category_filters["c_resid"] = "TOTAL"
+            if "unit" in available_filters and "NR" in available_filters["unit"]:
+                category_filters["unit"] = "NR"
+            if "nace_r2" in available_filters and "I551" in available_filters["nace_r2"]:
+                category_filters["nace_r2"] = "I551"
+            if "geo" in available_filters and "HU" in available_filters["geo"]:
+                category_filters["geo"] = "HU"
         try:
             series = make_monthly_series(tourism, category_filters=category_filters)
         except ValueError as error:
             statuses["models"] = f"NOT RUN: {error}"
         else:
             try:
-                fit_demand_models(series, PROCESSED_DIR)
+                run_chronological_prediction(tourism, PROCESSED_DIR, category_filters)
                 statuses["models"] = "Completed chronological model comparison"
             except ValueError as error:
                 statuses["models"] = f"NOT RUN: {error}"

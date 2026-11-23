@@ -9,6 +9,13 @@ import numpy as np
 import pandas as pd
 
 
+def _figures_dir(output_dir: Path) -> Path:
+    """Resolve repository figures from processed output; otherwise use local output."""
+    if output_dir.name == "processed" and output_dir.parent.name == "data":
+        return output_dir.parent.parent / "figures"
+    return output_dir / "figures"
+
+
 def make_monthly_series(
     frame: pd.DataFrame,
     category_filters: dict[str, str] | None = None,
@@ -33,7 +40,7 @@ def make_monthly_series(
 
 
 def fit_demand_models(series: pd.DataFrame, output_dir: Path) -> dict[str, object]:
-    """Compare seasonal-naive and random-forest forecasts on a chronological holdout."""
+    """Compare baseline and learned forecasts on a chronological holdout."""
     if len(series) < 30:
         raise ValueError("At least 30 monthly observations are required for the holdout model.")
     from sklearn.ensemble import RandomForestRegressor
@@ -50,11 +57,21 @@ def fit_demand_models(series: pd.DataFrame, output_dir: Path) -> dict[str, objec
 
     features = ["lag_1", "lag_12", "month"]
     train, test = data.iloc[:split], data.iloc[split:]
+    from sklearn.linear_model import LinearRegression
+
+    linear = LinearRegression()
+    linear.fit(train[features], train["value"])
+    linear_predictions = linear.predict(test[features])
     forest = RandomForestRegressor(n_estimators=300, min_samples_leaf=2, random_state=42)
     forest.fit(train[features], train["value"])
     predictions = forest.predict(test[features])
     baseline = test["lag_12"].to_numpy()
     metrics = {
+        "linear_regression": {
+            "mae": float(mean_absolute_error(test["value"], linear_predictions)),
+            "rmse": float(np.sqrt(mean_squared_error(test["value"], linear_predictions))),
+            "r2": float(r2_score(test["value"], linear_predictions)),
+        },
         "random_forest": {
             "mae": float(mean_absolute_error(test["value"], predictions)),
             "rmse": float(np.sqrt(mean_squared_error(test["value"], predictions))),
@@ -91,6 +108,7 @@ def fit_demand_models(series: pd.DataFrame, output_dir: Path) -> dict[str, objec
         {
             "period": test["period"].to_numpy(),
             "actual": test["value"].to_numpy(),
+            "linear_regression": linear_predictions,
             "random_forest": predictions,
             "seasonal_naive": baseline,
         }
@@ -100,23 +118,31 @@ def fit_demand_models(series: pd.DataFrame, output_dir: Path) -> dict[str, objec
 
     fig, ax = plt.subplots(figsize=(12, 8))
     ax.plot(test["period"], test["value"], label="Actual")
+    ax.plot(test["period"], linear_predictions, label="Linear regression")
     ax.plot(test["period"], predictions, label="Random forest")
     ax.plot(test["period"], baseline, label="Seasonal naive")
     ax.set(title="Tourism demand: chronological holdout", xlabel="Month", ylabel="Nights (provider unit)")
     ax.legend()
     fig.tight_layout()
-    fig.savefig(output_dir.parent.parent / "figures" / "actual_vs_predicted.png", dpi=160)
+    figures_dir = _figures_dir(output_dir)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(figures_dir / "actual_vs_predicted.png", dpi=160)
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(12, 8))
     plot_tree(tree, feature_names=features, class_names=["Low demand", "High demand"], filled=True, ax=ax)
     fig.tight_layout()
-    fig.savefig(output_dir.parent.parent / "figures" / "decision_tree.png", dpi=160)
+    fig.savefig(figures_dir / "decision_tree.png", dpi=160)
     plt.close(fig)
 
     with (output_dir / "model_metrics.json").open("w", encoding="utf-8") as target:
         json.dump(metrics, target, indent=2)
-    return {"metrics": metrics, "forest": forest, "tree": tree}
+    return {
+        "metrics": metrics,
+        "linear_regression": linear,
+        "forest": forest,
+        "tree": tree,
+    }
 
 
 def analyze_annual_economy(
@@ -188,14 +214,16 @@ def analyze_annual_economy(
         sns.heatmap(matrix, annot=True, cmap="vlag", center=0, ax=ax)
         ax.set_title("Annual tourism and economic indicator correlations")
         fig.tight_layout()
-        fig.savefig(output_dir.parent.parent / "figures" / "economic_correlation_heatmap.png", dpi=160)
+        figures_dir = _figures_dir(output_dir)
+        figures_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(figures_dir / "economic_correlation_heatmap.png", dpi=160)
         plt.close(fig)
         for column, model_result in simple_models.items():
             fig, ax = plt.subplots(figsize=(8, 5))
             sns.regplot(data=paired, x=column, y="tourism_nights", ax=ax)
             ax.set(title=f"Annual tourism and {column}", ylabel="Annual tourism nights")
             fig.tight_layout()
-            fig.savefig(output_dir.parent.parent / "figures" / f"regression_{column}.png", dpi=160)
+            fig.savefig(figures_dir / f"regression_{column}.png", dpi=160)
             plt.close(fig)
     pd.Series(correlations, name="pearson_correlation").to_csv(
         output_dir / "economic_correlations.csv", header=True

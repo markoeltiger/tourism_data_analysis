@@ -16,7 +16,7 @@ from src.data_cleaning import (
     world_bank_to_frame,
 )
 from src.data_collection import _save_response, download_sources
-from src.modelling import make_monthly_series
+from src.modelling import fit_demand_models, make_monthly_series
 
 
 class ProviderParsingTests(unittest.TestCase):
@@ -116,6 +116,33 @@ class ProviderParsingTests(unittest.TestCase):
         })
         with self.assertRaisesRegex(ValueError, "category_filters"):
             make_monthly_series(frame)
+
+    def test_chronological_models_reject_too_few_observations(self):
+        frame = pd.DataFrame({
+            "period": pd.date_range("2024-01-01", periods=29, freq="MS"),
+            "value": range(29),
+        })
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            with self.assertRaisesRegex(ValueError, "At least 30"):
+                fit_demand_models(frame, Path(temporary_directory))
+
+    def test_chronological_models_return_baseline_and_learned_metrics(self):
+        frame = pd.DataFrame({
+            "period": pd.date_range("2015-01-01", periods=48, freq="MS"),
+            "value": [100 + 10 * (index % 12) + index for index in range(48)],
+        })
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory)
+            result = fit_demand_models(frame, output)
+            metrics = result["metrics"]
+
+            self.assertEqual(set(("seasonal_naive", "linear_regression", "random_forest")), {
+                key for key in metrics if key in {"seasonal_naive", "linear_regression", "random_forest"}
+            })
+            self.assertIn("logistic_regression", metrics)
+            self.assertIn("decision_tree", metrics)
+            self.assertTrue((output / "model_predictions.csv").exists())
+            self.assertTrue((output / "model_metrics.json").exists())
 
 
 class RawProviderReaderTests(unittest.TestCase):
