@@ -6,15 +6,12 @@ This university project is designed to study tourism trends, seasonality,
 regional differences and the relationship between tourism and economic
 indicators using official Hungarian and European statistics.
 
-> **Data and results status (2026-11-23):** This run could not access the
-> external data providers because outbound network requests were denied by the
-> execution environment. No raw datasets were acquired, and therefore no
-> descriptive findings, charts, regression results or forecasts are reported.
-> The source inventory, acquisition code, analysis, dashboard and deliverable
-> templates are in place for a reproducible run when source access is available.
-> Seaborn, Scikit-learn and Jupyter are also absent from the current runtime;
-> install `requirements.txt` before running the full sourced analysis and
-> notebooks.
+> **Data status (2026-11-23):** The configured Eurostat, World Bank, KSH and
+> ECB endpoints returned valid provider payloads. Retrieved originals and their
+> SHA-256 manifest are stored locally under `data/raw/` and are excluded from
+> version control. The source inventory records the exact queries, observed
+> coverage and licensing notes. The acquisition layer does not publish raw
+> datasets or claim analytical findings.
 
 ## Research questions
 
@@ -27,14 +24,13 @@ indicators using official Hungarian and European statistics.
 
 ## Data sources
 
-The official source candidates, API patterns, geography, frequency, variables
-and retrieval status are recorded in [`data/source_inventory.csv`](data/source_inventory.csv).
-The planned inputs are Eurostat monthly accommodation nights at national and
-NUTS 2 levels, World Bank Hungary GDP/inflation/population indicators, KSH
-county tables and ECB HUF/EUR reference exchange rates. KSH and ECB are not
-currently downloaded by the automated pipeline; their exact file/query
-semantics must be verified before analysis. All source URLs and license notes
-must remain alongside any derived outputs.
+The exact source and download URLs, geographic scope, frequency, variables,
+observed coverage and licensing notes are recorded in
+[`data/source_inventory.csv`](data/source_inventory.csv). The inputs include
+Eurostat monthly national nights and an annual dataset labelled by Eurostat as
+NUTS 3, World Bank Hungary indicators, KSH county/region monthly tables, and
+daily ECB HUF/EUR reference rates. KSH CSV exports and ECB SDMX CSV are
+downloaded automatically alongside the Eurostat and World Bank API responses.
 
 ## Installation
 
@@ -52,11 +48,12 @@ With network access:
 python -m src.run_pipeline
 ```
 
-This saves original provider responses under `data/raw/`, parses them into
-`data/processed/`, computes descriptive summaries, creates figures, and runs a
-chronological demand-model comparison when the downloaded observations support
-one. Raw files are never edited in place. The pipeline surfaces HTTP, parsing,
-and data ambiguity errors rather than silently filling missing values.
+This saves byte-for-byte provider responses under `data/raw/`, writes a local
+`SHA256SUMS.txt` manifest, parses them into `data/processed/`, computes
+descriptive summaries, creates figures, and runs a chronological demand-model
+comparison when the downloaded observations support one. The pipeline
+surfaces HTTP, parsing, and data ambiguity errors rather than silently filling
+missing values.
 
 For already downloaded raw responses:
 

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import itertools
 import json
+import re
+from calendar import month_name
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +15,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / "data" / "raw"
 PROCESSED_DIR = ROOT / "data" / "processed"
+MONTHS = {name.lower(): number for number, name in enumerate(month_name) if name}
 
 
 def eurostat_to_frame(payload: dict[str, Any]) -> pd.DataFrame:
@@ -79,6 +83,77 @@ def world_bank_to_frame(payload: list[Any], indicator: str) -> pd.DataFrame:
     ).dropna(subset=["value"]).drop_duplicates().reset_index(drop=True)
 
 
+def ksh_to_frame(path: Path) -> pd.DataFrame:
+    """Expand an unmodified KSH STADAT semicolon-separated table into monthly rows."""
+    with path.open(encoding="iso-8859-2", newline="") as source:
+        rows = list(csv.reader(source, delimiter=";"))
+
+    header_index = next(
+        (
+            index
+            for index, row in enumerate(rows)
+            if len(row) >= 3
+            and row[0].strip() == "Name of territorial units"
+            and row[1].strip() == "Level of territorial units"
+        ),
+        None,
+    )
+    if header_index is None:
+        raise ValueError(f"Unexpected KSH table in {path.name}: monthly header not found")
+
+    columns = rows[header_index]
+    month_columns: list[tuple[int, int, int]] = []
+    for index, label in enumerate(columns[2:], start=2):
+        match = re.fullmatch(r"(\d{4}) ([A-Za-z]+)", label.strip())
+        if match and match.group(2).lower() in MONTHS:
+            month_columns.append((index, int(match.group(1)), MONTHS[match.group(2).lower()]))
+    if not month_columns:
+        raise ValueError(f"Unexpected KSH table in {path.name}: no monthly columns found")
+
+    records: list[dict[str, Any]] = []
+    accommodation_type = ""
+    for row in rows[header_index + 1 :]:
+        if not row or not row[0].strip():
+            continue
+        geography = row[0].strip()
+        level = row[1].strip() if len(row) > 1 else ""
+        if not level:
+            accommodation_type = geography
+            continue
+        for index, year, month in month_columns:
+            if index >= len(row) or not row[index].strip():
+                continue
+            number = row[index].replace(" ", "").replace("\u00a0", "").strip()
+            if not number.isdigit():
+                raise ValueError(
+                    f"Unexpected KSH value {row[index]!r} for {geography} in {year}-{month:02d}"
+                )
+            records.append(
+                {
+                    "period": pd.Timestamp(year=year, month=month, day=1),
+                    "geo": geography,
+                    "geo_level": level,
+                    "accommodation_type": accommodation_type,
+                    "value": int(number),
+                }
+            )
+    return pd.DataFrame(
+        records,
+        columns=["period", "geo", "geo_level", "accommodation_type", "value"],
+    ).drop_duplicates().reset_index(drop=True)
+
+
+def ecb_to_frame(path: Path) -> pd.DataFrame:
+    """Read the ECB CSV export without modifying it; retain daily HUF/EUR observations."""
+    frame = pd.read_csv(path, usecols=["TIME_PERIOD", "OBS_VALUE"])
+    return pd.DataFrame(
+        {
+            "date": pd.to_datetime(frame["TIME_PERIOD"], errors="coerce"),
+            "value": pd.to_numeric(frame["OBS_VALUE"], errors="coerce"),
+        }
+    ).dropna(subset=["date", "value"]).drop_duplicates().reset_index(drop=True)
+
+
 def clean_downloads(raw_dir: Path = RAW_DIR, processed_dir: Path = PROCESSED_DIR) -> dict[str, pd.DataFrame]:
     """Read cached raw files, normalize them and persist processed CSVs."""
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -97,6 +172,17 @@ def clean_downloads(raw_dir: Path = RAW_DIR, processed_dir: Path = PROCESSED_DIR
         economic = pd.concat(wb_frames, ignore_index=True).drop_duplicates()
         economic.to_csv(processed_dir / "world_bank_indicators.csv", index=False)
         outputs["world_bank_indicators"] = economic
+
+    for path in sorted((raw_dir / "ksh").glob("*.csv")):
+        frame = ksh_to_frame(path)
+        frame.to_csv(processed_dir / f"{path.stem}.csv", index=False)
+        outputs[path.stem] = frame
+
+    ecb_path = raw_dir / "ecb" / "EXR_D_HUF_EUR_SP00_A.csv"
+    if ecb_path.exists():
+        exchange_rates = ecb_to_frame(ecb_path)
+        exchange_rates.to_csv(processed_dir / "ecb_huf_eur_daily.csv", index=False)
+        outputs["ecb_huf_eur_daily"] = exchange_rates
     return outputs
 
 
