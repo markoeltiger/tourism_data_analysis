@@ -24,7 +24,15 @@ def run(
     else:
         statuses["collection"] = "Skipped by request; reading existing raw files"
 
-    raw_files = list(RAW_DIR.rglob("*.json")) if RAW_DIR.exists() else []
+    raw_files = (
+        [
+            path
+            for path in RAW_DIR.rglob("*")
+            if path.is_file() and path.suffix.lower() in {".json", ".csv"}
+        ]
+        if RAW_DIR.exists()
+        else []
+    )
     if not raw_files:
         statuses["data"] = "UNAVAILABLE: no raw source responses found; no results computed"
         _write_status(statuses)

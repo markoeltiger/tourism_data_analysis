@@ -1,19 +1,20 @@
 # Data and provenance
 
-`raw/` is reserved for byte-for-byte provider responses and is intentionally not
+`raw/` contains byte-for-byte provider responses and is intentionally not
 committed. `processed/` contains generated outputs and is also intentionally
-not committed. The source inventory in `source_inventory.csv` records the
-intended official sources and the acquisition status observed in this run.
+not committed. Run `python -m src.data_collection` to fetch the official
+Eurostat, World Bank, KSH, and ECB inputs and write `raw/SHA256SUMS.txt` with
+the SHA-256 digest of every retrieved response. Failed HTTP requests or
+unexpected provider payloads stop acquisition and are surfaced to the caller.
 
-**Current status:** no external dataset has been downloaded or verified. The
-runtime denied outbound source access. The inventory URLs and API patterns are
-configured as leads for reproducible retrieval, not proof that a request
-succeeded. No observations, statistics, charts, model results, or findings are
-claimed in the current repository.
+Run `python -m src.run_pipeline` to acquire and process the raw data, or
+`python -m src.run_pipeline --skip-download` to process only files already
+under `raw/`. The provider parsers read the raw files without modifying them.
 
-When access is available, run `python -m src.run_pipeline`. If KSH remains
-unavailable through the script, open the relevant KSH table page from the
-inventory, use its table download/export control to obtain the published
-workbook/CSV, save the original file under `data/raw/ksh/`, and record its
-exact file URL, format, retrieval date, and license in the inventory before
-adding a parser. Do not copy/paste or edit the source data in a spreadsheet.
+[`source_inventory.csv`](source_inventory.csv) records the source table and
+exact download URL, geography, frequency, variables, observed/requested
+coverage, response format and licensing notes for every input. Eurostat and
+World Bank originals were already present locally and matched the live
+provider responses byte-for-byte on 2026-11-23. KSH terms were not stated on
+the linked table page; confirm the current reuse conditions before
+redistributing KSH data. Raw data files are not included in the repository.
