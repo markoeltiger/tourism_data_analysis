@@ -5,12 +5,28 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import pandas as pd
 import streamlit as st
 from src.dashboard_filters import filter_month_year, prepare_month_year
+from src.tourism_figures import (
+    figure_data_uri,
+    plot_annual_correlation,
+    plot_monthly_seasonality,
+    plot_monthly_trend,
+    plot_regional_values,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PROCESSED = ROOT / "data" / "processed"
+
+
+def _show_figure(fig: Figure) -> None:
+    """Render a Seaborn figure inline, avoiding Streamlit media-file URLs."""
+    title = next((ax.get_title() for ax in fig.axes if ax.get_title()), "Tourism figure")
+    st.image(figure_data_uri(fig), caption=title, width="stretch")
+    plt.close(fig)
 
 
 st.set_page_config(page_title="Discover Hungary", page_icon="🇭🇺", layout="wide")
@@ -75,6 +91,12 @@ tab_overview, tab_seasonality, tab_geography, tab_economy, tab_prediction = st.t
 )
 
 with tab_overview:
+    source_codes = ", ".join(
+        f"{column}={value}" for column, value in dimension_choices.items()
+    )
+    st.caption(
+        f"Source: Eurostat tour_occ_nim ({source_codes}); unit NR is a count of nights."
+    )
     first, second, third = st.columns(3)
     first.metric("Observed nights", f"{filtered['value'].sum():,.0f}")
     second.metric("Months in view", f"{filtered['period'].nunique():,}")
@@ -91,29 +113,30 @@ with tab_overview:
     elif filtered.duplicated(["period"]).any():
         st.warning("The remaining dimensions do not define one unique observation per month.")
     else:
-        st.line_chart(
-            filtered.set_index("period")[["value"]],
-            use_container_width=True,
-            y_label="Nights (provider unit)",
+        fig = plot_monthly_trend(
+            filtered,
+            title="Monthly tourism nights in Hungary — selected Eurostat series",
+            ylabel="Nights spent (number)",
         )
+        _show_figure(fig)
     st.dataframe(filtered, use_container_width=True)
 
 with tab_seasonality:
+    st.caption(
+        "Source: Eurostat tour_occ_nim using the selected categories and observed "
+        "monthly nights; missing values are not imputed."
+    )
     if filtered.empty:
         st.info("Choose at least one year and month.")
     elif filtered.duplicated(["period"]).any():
         st.info("Select one exact provider category before comparing monthly seasonality.")
     else:
-        seasonality = (
-            filtered.assign(month_name=filtered["period"].dt.strftime("%b"))
-            .groupby(["month", "month_name"], as_index=False)["value"].mean()
-            .sort_values("month")
+        fig = plot_monthly_seasonality(
+            filtered,
+            title="Seasonality in observed Hungarian tourism nights",
+            ylabel="Nights spent (number)",
         )
-        st.bar_chart(
-            seasonality.set_index("month_name")[["value"]],
-            use_container_width=True,
-            y_label="Mean nights (provider unit)",
-        )
+        _show_figure(fig)
 
 with tab_geography:
     ksh_path = PROCESSED / "ksh_tourism_monthly.csv"
@@ -123,23 +146,53 @@ with tab_geography:
         ksh = pd.read_csv(ksh_path)
         ksh["period"] = pd.to_datetime(ksh["period"], errors="coerce")
         ksh = ksh.dropna(subset=["period", "value"])
+        dataset_options = sorted(ksh["dataset"].dropna().astype(str).unique())
+        dataset = st.selectbox("KSH source table", dataset_options)
         geo_level = st.selectbox(
             "Geographic level",
-            sorted(ksh["geo_level"].dropna().unique()),
+            sorted(ksh.loc[ksh["dataset"] == dataset, "geo_level"].dropna().unique()),
         )
         accommodation = st.selectbox(
             "Accommodation type",
-            sorted(ksh["accommodation_type"].dropna().unique()),
+            sorted(
+                ksh.loc[
+                    (ksh["dataset"] == dataset) & (ksh["geo_level"] == geo_level),
+                    "accommodation_type",
+                ].dropna().unique()
+            ),
+        )
+        periods = sorted(
+            ksh.loc[
+                (ksh["dataset"] == dataset)
+                & (ksh["geo_level"] == geo_level)
+                & (ksh["accommodation_type"] == accommodation),
+                "period",
+            ].dropna().unique()
+        )
+        period = st.selectbox(
+            "Observation month",
+            periods,
+            index=len(periods) - 1,
+            format_func=lambda value: pd.Timestamp(value).strftime("%B %Y"),
         )
         ksh = ksh.loc[
-            (ksh["geo_level"] == geo_level)
+            (ksh["dataset"] == dataset)
+            & (ksh["geo_level"] == geo_level)
             & (ksh["accommodation_type"] == accommodation)
+            & (ksh["period"] == period)
         ]
         st.caption(
-            "This table preserves the source geography and is not a ranking or "
-            "map. Eurostat national observations and KSH county observations "
-            "must not be summed or directly compared."
+            f"KSH {dataset}; source observations for {pd.Timestamp(period):%B %Y}. "
+            "Geographies are shown in source-name order, not ranked. "
+            "Eurostat national and KSH geographic observations must not be summed "
+            "or directly compared."
         )
+        if not ksh.empty:
+            fig = plot_regional_values(
+                ksh,
+                title=f"KSH tourism nights by {geo_level} — {pd.Timestamp(period):%B %Y}",
+            )
+            _show_figure(fig)
         st.dataframe(ksh.sort_values(["period", "geo"]), use_container_width=True)
 
 with tab_economy:
@@ -158,7 +211,21 @@ with tab_economy:
         st.dataframe(annual, use_container_width=True)
     if correlations_path.exists():
         st.subheader("Pearson correlations")
-        st.dataframe(pd.read_csv(correlations_path), use_container_width=True)
+        correlations = pd.read_csv(correlations_path, index_col=0)
+        correlation_figure = plot_annual_correlation(
+            annual if annual_path.exists() else pd.DataFrame()
+        )
+        if correlation_figure is None:
+            st.info("No compatible annual tourism-economic correlations are available.")
+        else:
+            _show_figure(correlation_figure)
+            st.caption(
+                "Source: matched annual Eurostat tourism nights and World Bank "
+                f"Hungary indicators, {int(annual['year'].min())}–"
+                f"{int(annual['year'].max())} (n={len(annual)}). Descriptive "
+                "correlations are not causal evidence."
+            )
+        st.dataframe(correlations, use_container_width=True)
     if regression_path.exists():
         st.subheader("Regression diagnostics")
         st.json(json.loads(regression_path.read_text(encoding="utf-8")))
