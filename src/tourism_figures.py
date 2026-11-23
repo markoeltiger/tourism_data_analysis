@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+from io import BytesIO
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -114,6 +117,14 @@ def _finish(fig: Figure, created_axes: bool) -> Figure:
     if created_axes:
         fig.tight_layout()
     return fig
+
+
+def figure_data_uri(fig: Figure) -> str:
+    """Encode a Matplotlib figure inline to avoid a separate media-file request."""
+    image = BytesIO()
+    fig.savefig(image, format="png", bbox_inches="tight")
+    encoded = base64.b64encode(image.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def plot_monthly_trend(

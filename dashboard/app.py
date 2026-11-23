@@ -6,10 +6,12 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import pandas as pd
 import streamlit as st
 from src.dashboard_filters import filter_month_year, prepare_month_year
 from src.tourism_figures import (
+    figure_data_uri,
     plot_annual_correlation,
     plot_monthly_seasonality,
     plot_monthly_trend,
@@ -18,6 +20,13 @@ from src.tourism_figures import (
 
 ROOT = Path(__file__).resolve().parents[1]
 PROCESSED = ROOT / "data" / "processed"
+
+
+def _show_figure(fig: Figure) -> None:
+    """Render a Seaborn figure inline, avoiding Streamlit media-file URLs."""
+    title = next((ax.get_title() for ax in fig.axes if ax.get_title()), "Tourism figure")
+    st.image(figure_data_uri(fig), caption=title, width="stretch")
+    plt.close(fig)
 
 
 st.set_page_config(page_title="Discover Hungary", page_icon="🇭🇺", layout="wide")
@@ -109,8 +118,7 @@ with tab_overview:
             title="Monthly tourism nights in Hungary — selected Eurostat series",
             ylabel="Nights spent (number)",
         )
-        st.pyplot(fig, use_container_width=True)
-        plt.close(fig)
+        _show_figure(fig)
     st.dataframe(filtered, use_container_width=True)
 
 with tab_seasonality:
@@ -128,8 +136,7 @@ with tab_seasonality:
             title="Seasonality in observed Hungarian tourism nights",
             ylabel="Nights spent (number)",
         )
-        st.pyplot(fig, use_container_width=True)
-        plt.close(fig)
+        _show_figure(fig)
 
 with tab_geography:
     ksh_path = PROCESSED / "ksh_tourism_monthly.csv"
@@ -185,8 +192,7 @@ with tab_geography:
                 ksh,
                 title=f"KSH tourism nights by {geo_level} — {pd.Timestamp(period):%B %Y}",
             )
-            st.pyplot(fig, use_container_width=True)
-            plt.close(fig)
+            _show_figure(fig)
         st.dataframe(ksh.sort_values(["period", "geo"]), use_container_width=True)
 
 with tab_economy:
@@ -212,8 +218,7 @@ with tab_economy:
         if correlation_figure is None:
             st.info("No compatible annual tourism-economic correlations are available.")
         else:
-            st.pyplot(correlation_figure, use_container_width=True)
-            plt.close(correlation_figure)
+            _show_figure(correlation_figure)
             st.caption(
                 "Source: matched annual Eurostat tourism nights and World Bank "
                 f"Hungary indicators, {int(annual['year'].min())}–"

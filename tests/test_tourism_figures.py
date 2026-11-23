@@ -1,3 +1,4 @@
+import base64
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ import pandas as pd
 
 from src.generate_deliverables import _presentation_charts
 from src.tourism_figures import (
+    figure_data_uri,
     plot_annual_correlation,
     plot_monthly_seasonality,
     plot_monthly_trend,
@@ -85,6 +87,21 @@ class TourismFigureTests(unittest.TestCase):
         self.assertEqual(seasonality.axes[0].get_xlabel(), "Month")
         plt.close(trend)
         plt.close(seasonality)
+
+    def test_figure_data_uri_contains_inline_png(self) -> None:
+        selected, _ = prepare_residence_series(self.monthly)
+        figure = plot_monthly_trend(
+            selected,
+            title="Hungary tourism nights",
+            hue_column="residence_category",
+        )
+
+        data_uri = figure_data_uri(figure)
+
+        self.assertTrue(data_uri.startswith("data:image/png;base64,"))
+        image_bytes = base64.b64decode(data_uri.partition(",")[2])
+        self.assertTrue(image_bytes.startswith(b"\x89PNG\r\n\x1a\n"))
+        plt.close(figure)
 
     def test_regional_comparison_uses_latest_compatible_source_rows(self) -> None:
         regions = pd.DataFrame(
