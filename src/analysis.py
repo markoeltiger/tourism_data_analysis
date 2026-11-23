@@ -70,7 +70,34 @@ def run_eda(frames: dict[str, pd.DataFrame], figures_dir: Path = FIGURES_DIR) ->
 
     if summaries:
         pd.concat(summaries, names=["dataset", "statistic"]).to_csv(SUMMARY_PATH)
+        _write_eda_caveats(frames)
     return summaries
+
+
+def _write_eda_caveats(frames: dict[str, pd.DataFrame]) -> None:
+    """Record factual coverage and geography limitations beside generated figures."""
+    rows: list[dict[str, str | int]] = []
+    for name, frame in frames.items():
+        geo_columns = [column for column in frame.columns if column in {"geo", "geo_label"}]
+        geographies = sorted(
+            {
+                str(value)
+                for column in geo_columns
+                for value in frame[column].dropna().unique()
+            }
+        )
+        rows.append({
+            "dataset": name,
+            "rows": int(len(frame)),
+            "geographies": ", ".join(geographies) or "not supplied",
+            "caveat": (
+                "National Eurostat and county/region KSH observations should not be summed "
+                "or directly compared because their geographic units and definitions differ."
+                if name in {"tour_occ_nim", "ksh_tourism_monthly"}
+                else "Descriptive output reflects provider observations only; no causal interpretation."
+            ),
+        })
+    pd.DataFrame(rows).to_csv(PROCESSED_DIR / "eda_coverage.csv", index=False)
 
 
 if __name__ == "__main__":
