@@ -1,4 +1,4 @@
-"""Render the evidence-status report and 12-slide presentation PDFs."""
+"""Render the evidence-backed report and 12-slide presentation PDFs."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def render_slides(source: Path, destination: Path) -> None:
             fig.text(0.08, 0.72, title.strip(), color="#102a43", fontsize=28, weight="bold")
             wrapped = "\n".join(textwrap.wrap(body.strip().replace("\n", " "), width=78))
             fig.text(0.08, 0.57, wrapped, color="#243b53", fontsize=19, va="top", linespacing=1.5)
-            fig.text(0.08, 0.08, "DISCOVER HUNGARY  •  SOURCE RESULTS NOT YET AVAILABLE",
+            fig.text(0.08, 0.08, "DISCOVER HUNGARY  •  OFFICIAL-SOURCE EMPIRICAL RESULTS",
                      color="#627d98", fontsize=10, weight="bold")
             pdf.savefig(fig)
             plt.close(fig)
@@ -63,7 +63,7 @@ def main() -> None:
     REPORTS.mkdir(parents=True, exist_ok=True)
     render_report(REPORTS / "project_report.md", REPORTS / "project_report.pdf")
     render_slides(REPORTS / "presentation.md", REPORTS / "presentation.pdf")
-    print("Rendered report and 12-slide presentation PDFs with explicit data-status notices.")
+    print("Rendered report and 12-slide presentation PDFs with evidence-backed results.")
 
 
 if __name__ == "__main__":

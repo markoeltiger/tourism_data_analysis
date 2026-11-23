@@ -73,9 +73,11 @@ tourism; do not infer monthly economic data from annual values.
 streamlit run dashboard/app.py
 ```
 
-The dashboard uses processed files only. It displays an explicit unavailable
-state until a usable tourism dataset exists. Totals are shown only for one
-selected monthly series and not as an unsafe sum across categories.
+The dashboard uses processed files only. It provides independent year and month
+filters, exact Eurostat category selectors, a KSH source-observation table,
+annual economic association views and chronological prediction outputs.
+Dashboard totals are never unsafe sums across Eurostat categories. KSH county
+and regional observations are displayed without invented rankings or maps.
 
 ## Notebooks and deliverables
 
