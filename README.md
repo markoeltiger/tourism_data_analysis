@@ -82,6 +82,12 @@ and regional observations are displayed without invented rankings or maps.
 ## Notebooks and deliverables
 
 Run notebooks `01` through `06` in order after installing the requirements.
+For a standalone Seaborn practice session, open
+[`notebooks/seaborn_exercises.ipynb`](notebooks/seaborn_exercises.ipynb) and
+run it from top to bottom. It uses Seaborn's Anscombe and penguins example
+datasets, which may require an internet connection on first load. The London
+Landmark Half Marathon 2023 dataset was not supplied and no download source was
+specified, so the notebook does not retrieve or fabricate it.
 `reports/project_report.md` and `reports/presentation.md` are the editable
 source text; the corresponding PDFs are generated with:
 
