@@ -2,19 +2,16 @@
 ## Trends, regional differences, seasonality and predictive modelling
 
 **University Data Analysis project**  
-**Status:** Source acquisition and empirical analysis unavailable in this run  
+**Status:** Processed empirical results available locally
 **Prepared:** 23 November 2026
 
 ## Abstract
 
-This project establishes a reproducible workflow for analysing Hungarian
-tourism using official statistical sources. The intended scope includes monthly
-overnight stays, regional comparisons, seasonal patterns, economic indicators
-and chronological demand prediction. External source access was denied during
-this run, so no observations were downloaded. Consequently, this report
-contains no empirical estimates, charts or model results; it documents the
-research design and the exact boundary between implemented code and
-unavailable evidence.
+This project implements a reproducible workflow for analysing Hungarian
+tourism using official statistical sources. The processed evidence includes
+141 monthly domestic Eurostat observations, KSH county/regional observations,
+annual World Bank indicators and a chronological tourism-demand holdout.
+The exact Eurostat domestic series is used for trend and model results.
 
 ## 1. Introduction
 
@@ -38,9 +35,9 @@ The dataset inventory identifies Eurostat monthly tourism tables, Hungarian
 Central Statistical Office (KSH) county tables, World Bank Development
 Indicators and the European Central Bank exchange-rate dataset. The provider
 references and intended variables appear in `data/source_inventory.csv`.
-Source access, current series codes, date coverage and licenses remain
-unverified in this environment and must be checked against the providers
-before interpreting results.
+The source inventory records exact series codes, provider payload coverage,
+retrieval URLs and licenses. Provider revisions should be checked before
+future analyses are updated.
 
 ## 4. Data and methodology
 
@@ -61,42 +58,57 @@ remain pending data availability and review of compatible variables.
 
 ## 5. Exploratory and statistical results
 
-**Unavailable — no source observations were acquired.** No tourism totals,
-growth rates, rankings, seasonal averages, correlations or regression
-coefficients are reported. This omission is deliberate; values cannot be
-calculated without authentic downloaded data.
+The selected exact Eurostat series contains 141 monthly domestic-country
+observations from 2015-01 through 2026-09, with 132,738,487 nights in total.
+The period includes 2026 observations that may be incomplete; it is not treated
+as a complete annual year. Annual aggregation rises from 9,974,972 nights in
+2015 to 12,669,186 in 2025, with a 2020 low of 7,876,805. Average monthly
+demand peaks in August and July. KSH processed observations cover 2021-01
+through 2026-09 at county and regional geographic levels; these figures are
+provider observations and are not ranked or mapped.
+
+Eleven annual tourism observations align with the World Bank indicators.
+Simple Pearson correlations are 0.050 for CPI inflation, 0.212 for real GDP
+growth, 0.240 for GDP per capita and -0.122 for population. A multiple linear
+model has R-squared 0.338, but 11 observations and a predictor condition number
+of 3.195 million show why coefficients are unsuitable for causal or stable
+out-of-sample interpretation.
 
 ## 6. Models
 
-**Unavailable — no training or test series exists in the workspace.** Model
-scores, feature importance and predicted values are not claimed. On successful
-acquisition, the pipeline writes the holdout predictions and metrics; the
-results must then be reviewed for data coverage, series breaks and baseline
-comparability.
+The chronological holdout is 26 months. The seasonal-naive baseline has
+MAE 108,174, RMSE 123,191 and R-squared 0.947. The random forest has
+MAE 111,227, RMSE 149,037 and R-squared 0.923. The linear regression has
+MAE 240,465, RMSE 318,313 and R-squared 0.647. At the training-median threshold
+of 1,801,215 nights, logistic regression achieves accuracy 0.923 and F1 0.955;
+the shallow decision tree achieves accuracy 0.846 and F1 0.909. Metrics describe
+the computed holdout only and are not forecasts of future accuracy.
 
 ## 7. Visualizations and dashboard
 
-The analysis code creates trend and monthly-distribution figures from
-processed observations. The Streamlit dashboard reads only these processed
-files and shows an explicit unavailable message when they are absent. No
-data-backed chart is included in this edition.
+The analysis pipeline creates monthly trend, seasonality, raincloud, correlation,
+regression and prediction figures from processed observations. The Streamlit
+dashboard applies year and month filters independently, keeps source dimensions
+explicit and reports unavailable sections separately. Its geography view
+displays processed KSH records; it does not rank counties or create a regional
+map without a documented geographic join.
 
 ## 8. Discussion
 
-The current result is an implementation scaffold, not an empirical study. The
-principal limitation is source-access failure, followed by unverified API
-filters and KSH download details. Further limitations include mismatched
-frequencies, evolving regional classifications, data revisions and the
-inability of observational correlations to establish causal economic impact.
-The current Python environment also lacks Seaborn, Scikit-learn and Jupyter,
-which are declared in `requirements.txt` but could not be exercised here.
+The principal empirical limitations are the short annual economic sample,
+changing or partial source coverage, structural breaks including 2020 and the
+incomplete 2026 observations. Eurostat national and KSH geographic observations
+use different definitions and must not be summed or directly compared. Monthly
+forecast error may depend on the chosen series, changing category codes and
+structural tourism shocks. Associations do not establish economic causality.
 
 ## 9. Conclusion
 
-The repository now provides a modular collection and analysis workflow,
-dashboard, source inventory, report and presentation templates. The substantive
-research questions remain unanswered until provider data can be downloaded,
-validated and analysed. No fabricated data or results have been substituted.
+The repository provides a reproducible collection and cleaning pipeline,
+empirical processed datasets, a chronological model comparison, a dashboard,
+and evidence-backed report templates. Summer demand is visibly higher in the
+selected series. Annual economic associations are weak, and stable causal
+inference is unsupported. No county ranking or regional map is inferred.
 
 ## References
 
@@ -109,6 +121,6 @@ validated and analysed. No fabricated data or results have been substituted.
 - European Central Bank, Exchange Rates data: links recorded in
   `data/source_inventory.csv`.
 
-**Retrieval date/status:** 23 November 2026; source access denied in the
-execution environment. The references identify intended providers and do not
-imply successful retrieval.
+**Retrieval date/status:** 23 November 2026; provider observations are
+available in the local processed data. Re-run the collection pipeline for
+provider revisions or newly released observations.
