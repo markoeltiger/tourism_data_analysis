@@ -18,6 +18,34 @@ PROCESSED_DIR = ROOT / "data" / "processed"
 MONTHS = {name.lower(): number for number, name in enumerate(month_name) if name}
 
 
+def _normalize_strings(
+    frame: pd.DataFrame,
+    columns: list[str],
+    uppercase: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Trim provider strings and normalize only identifier codes to uppercase."""
+    for column in columns:
+        if column in frame:
+            frame[column] = frame[column].map(
+                lambda value: value.strip() if isinstance(value, str) else value
+            )
+            if column in uppercase:
+                frame[column] = frame[column].map(
+                    lambda value: value.upper() if isinstance(value, str) else value
+                )
+    return frame
+
+
+def _deduplicate(frame: pd.DataFrame, keys: list[str], dataset: str) -> pd.DataFrame:
+    """Drop exact duplicate rows and reject conflicting observations for one key."""
+    duplicate_rows = frame.loc[frame.duplicated(keys, keep=False)]
+    if not duplicate_rows.empty:
+        for _, group in duplicate_rows.groupby(keys, dropna=False, sort=False):
+            if len(group.drop_duplicates()) > 1:
+                raise ValueError(f"Conflicting duplicate observation in {dataset}")
+    return frame.drop_duplicates().reset_index(drop=True)
+
+
 def eurostat_to_frame(payload: dict[str, Any]) -> pd.DataFrame:
     """Expand Eurostat JSON-stat dimensions into one row per observation."""
     dimension_ids = payload["id"]
@@ -33,9 +61,9 @@ def eurostat_to_frame(payload: dict[str, Any]) -> pd.DataFrame:
             if isinstance(index, dict)
             else list(range(len(index)))
         )
-        categories.append([str(code) for code in ordered_codes])
+        categories.append([str(code).strip() for code in ordered_codes])
         labels[name] = {
-            str(code): str(category.get("label", {}).get(str(code), code))
+            str(code).strip(): str(category.get("label", {}).get(str(code), code)).strip()
             for code in ordered_codes
         }
 
@@ -58,11 +86,30 @@ def eurostat_to_frame(payload: dict[str, Any]) -> pd.DataFrame:
     frame = pd.DataFrame(rows)
     if frame.empty:
         return frame
+    _normalize_strings(
+        frame,
+        dimension_ids,
+        uppercase=tuple(name for name in dimension_ids if name != "time"),
+    )
     time_column = next((name for name in dimension_ids if name in {"time", "month"}), None)
     if time_column:
         frame["period"] = pd.to_datetime(frame[time_column], format="mixed", errors="coerce")
     frame["value"] = pd.to_numeric(frame["value"], errors="coerce")
-    return frame.dropna(subset=["value"]).drop_duplicates().reset_index(drop=True)
+    required = ["value", *(["period"] if time_column else [])]
+    frame = frame.dropna(subset=required)
+    if time_column:
+        frame["year"] = frame["period"].dt.year.astype("Int64")
+        is_monthly = (
+            frame["freq"].eq("M").all()
+            if "freq" in frame
+            else time_column == "month"
+            or frame[time_column].astype(str).str.fullmatch(r"\d{4}-\d{2}").all()
+        )
+        if is_monthly:
+            frame["month"] = frame["period"].dt.month.astype("Int64")
+    return _deduplicate(frame, dimension_ids, "Eurostat").sort_values(
+        dimension_ids, kind="stable"
+    ).reset_index(drop=True)
 
 
 def world_bank_to_frame(payload: list[Any], indicator: str) -> pd.DataFrame:
@@ -72,7 +119,7 @@ def world_bank_to_frame(payload: list[Any], indicator: str) -> pd.DataFrame:
     frame = pd.DataFrame(payload[1])
     if frame.empty:
         return pd.DataFrame(columns=["year", "indicator", "value", "country_code"])
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         {
             "year": pd.to_numeric(frame["date"], errors="coerce").astype("Int64"),
             "indicator": indicator,
@@ -80,7 +127,13 @@ def world_bank_to_frame(payload: list[Any], indicator: str) -> pd.DataFrame:
             "country_code": frame["countryiso3code"],
             "country_name": frame["country"].map(lambda item: item.get("value") if isinstance(item, dict) else None),
         }
-    ).dropna(subset=["value"]).drop_duplicates().reset_index(drop=True)
+    )
+    _normalize_strings(frame, ["indicator", "country_code"], uppercase=("country_code",))
+    _normalize_strings(frame, ["country_name"])
+    frame = frame.dropna(subset=["year", "value", "country_code"])
+    return _deduplicate(frame, ["year", "country_code", "indicator"], "World Bank").sort_values(
+        ["country_code", "year", "indicator"], kind="stable"
+    ).reset_index(drop=True)
 
 
 def ksh_to_frame(path: Path) -> pd.DataFrame:
@@ -137,21 +190,62 @@ def ksh_to_frame(path: Path) -> pd.DataFrame:
                     "value": int(number),
                 }
             )
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         records,
         columns=["period", "geo", "geo_level", "accommodation_type", "value"],
-    ).drop_duplicates().reset_index(drop=True)
+    )
+    _normalize_strings(frame, ["geo", "geo_level", "accommodation_type"])
+    if not frame.empty:
+        frame["year"] = frame["period"].dt.year.astype("Int64")
+        frame["month"] = frame["period"].dt.month.astype("Int64")
+    return _deduplicate(
+        frame,
+        ["period", "geo", "geo_level", "accommodation_type"],
+        path.name,
+    ).sort_values(
+        ["period", "geo", "geo_level", "accommodation_type"], kind="stable"
+    ).reset_index(drop=True)
 
 
 def ecb_to_frame(path: Path) -> pd.DataFrame:
     """Read the ECB CSV export without modifying it; retain daily HUF/EUR observations."""
     frame = pd.read_csv(path, usecols=["TIME_PERIOD", "OBS_VALUE"])
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         {
             "date": pd.to_datetime(frame["TIME_PERIOD"], errors="coerce"),
             "value": pd.to_numeric(frame["OBS_VALUE"], errors="coerce"),
         }
-    ).dropna(subset=["date", "value"]).drop_duplicates().reset_index(drop=True)
+    ).dropna(subset=["date", "value"])
+    if not frame.empty:
+        frame["year"] = frame["date"].dt.year.astype("Int64")
+        frame["month"] = frame["date"].dt.month.astype("Int64")
+    return _deduplicate(frame, ["date"], path.name).sort_values(
+        "date", kind="stable"
+    ).reset_index(drop=True)
+
+
+def _world_bank_wide(frame: pd.DataFrame) -> pd.DataFrame:
+    """Pivot compatible annual country indicators without filling missing values."""
+    if frame.empty:
+        return pd.DataFrame(columns=["year", "country_code", "country_name"])
+    country_names = frame.loc[
+        frame["country_name"].notna(), ["country_code", "country_name"]
+    ].drop_duplicates()
+    if country_names.duplicated("country_code").any():
+        raise ValueError("Conflicting country names in World Bank indicators")
+    wide = frame.pivot(
+        index=["year", "country_code"],
+        columns="indicator",
+        values="value",
+    ).reset_index().merge(
+        country_names,
+        on="country_code",
+        how="left",
+        validate="many_to_one",
+    )
+    wide.columns.name = None
+    indicators = sorted(frame["indicator"].dropna().unique())
+    return wide[["year", "country_code", "country_name", *indicators]]
 
 
 def clean_downloads(raw_dir: Path = RAW_DIR, processed_dir: Path = PROCESSED_DIR) -> dict[str, pd.DataFrame]:
@@ -169,14 +263,36 @@ def clean_downloads(raw_dir: Path = RAW_DIR, processed_dir: Path = PROCESSED_DIR
         with path.open(encoding="utf-8") as source:
             wb_frames.append(world_bank_to_frame(json.load(source), path.stem))
     if wb_frames:
-        economic = pd.concat(wb_frames, ignore_index=True).drop_duplicates()
+        economic = _deduplicate(
+            pd.concat(wb_frames, ignore_index=True),
+            ["year", "country_code", "indicator"],
+            "World Bank",
+        ).sort_values(["country_code", "year", "indicator"]).reset_index(drop=True)
         economic.to_csv(processed_dir / "world_bank_indicators.csv", index=False)
         outputs["world_bank_indicators"] = economic
+        economic_wide = _world_bank_wide(economic)
+        economic_wide.to_csv(processed_dir / "world_bank_indicators_wide.csv", index=False)
+        outputs["world_bank_indicators_wide"] = economic_wide
 
+    ksh_frames = []
     for path in sorted((raw_dir / "ksh").glob("*.csv")):
         frame = ksh_to_frame(path)
         frame.to_csv(processed_dir / f"{path.stem}.csv", index=False)
         outputs[path.stem] = frame
+        if not frame.empty:
+            frame = frame.copy()
+            frame.insert(0, "dataset", path.stem)
+            ksh_frames.append(frame)
+    if ksh_frames:
+        ksh_monthly = _deduplicate(
+            pd.concat(ksh_frames, ignore_index=True),
+            ["dataset", "period", "geo", "geo_level", "accommodation_type"],
+            "KSH",
+        ).sort_values(
+            ["dataset", "period", "geo", "geo_level", "accommodation_type"]
+        ).reset_index(drop=True)
+        ksh_monthly.to_csv(processed_dir / "ksh_tourism_monthly.csv", index=False)
+        outputs["ksh_tourism_monthly"] = ksh_monthly
 
     ecb_path = raw_dir / "ecb" / "EXR_D_HUF_EUR_SP00_A.csv"
     if ecb_path.exists():
